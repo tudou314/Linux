@@ -4,6 +4,7 @@
 #tudou314
 #2019.06.11
 
+
 Host_ip="$(hostname -I | cut -d' ' -f1)"
 Zabbix_web_exist=55
 Err_net=56
