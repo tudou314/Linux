@@ -4,8 +4,28 @@
 #2019-09-12
 
 
-Host_IP=$(ip addr|grep "inet "|grep -v 127.0.0.1|awk '{print $2}'|cut -d/ -f1)
+#[ $(id -u) != "0" ] && echo "必须是 root 权限!" && exit 1
+if [ $(id -u) -ne  0 ] ;then
+        echo "必须是 root 权限!" && exit 1
+fi
+
+#检查系统版本
+if ! cat /etc/redhat-release  | cut -d'.' -f1 | egrep -q 7 ;then
+	echo "请确认系统环境是CentOS7" && exit 2
+fi
+
+#Host_IP=$(ip addr|grep "inet " | grep -v 127.0.0.1 | awk '{print $2}'|cut -d/ -f1)
 Date=$(date +%F_%T)
+
+Test_net (){
+    echo -e "\n 请稍等，正在检测网络环境..."
+    ping -w2 -c2 223.5.5.5 &>/dev/null && net_stat=yes || net_stat=no
+    if [ ${net_stat} = "no" ];then
+        echo "外网IP：223.5.5.5 无法访问，安装程序需要时访问网络"
+        sleep 5
+    fi
+}
+Test_net
 
 Install_EPEL (){
     yum install -y epel-release
@@ -112,7 +132,11 @@ do
             Close_selinux
             ;;
         4)
-            Install_EPEL
+            if [ ${net_stat} == "yes" ];then
+                Install_EPEL
+            else 
+                echo "外网无法访问！" 
+            fi
             ;;
         5)
             Add_user
@@ -121,10 +145,18 @@ do
             Set_sudo
             ;;
         7)
-            Yum_package
+            if [ ${net_stat} == "yes" ];then
+                Yum_package
+            else 
+                echo "外网无法访问！" 
+            fi
             ;;
         8)
-            Set_date_timezone
+            if [ ${net_stat} == "yes" ];then
+                Set_date_timezone
+            else 
+                echo "外网无法访问！" 
+            fi
             ;;
         q|9)
             echo -e "\e[1m 退出脚本！\e[0m \n" 
