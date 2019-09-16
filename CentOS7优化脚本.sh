@@ -16,6 +16,7 @@ fi
 
 #Host_IP=$(ip addr|grep "inet " | grep -v 127.0.0.1 | awk '{print $2}'|cut -d/ -f1)
 Date=$(date +%F_%T)
+Echo_net_err="\e[5m\e[1m 外网无法访问！\e[0m"
 
 Test_net (){
     echo -e "\n 请稍等，正在检测网络环境..."
@@ -28,7 +29,15 @@ Test_net (){
 Test_net
 
 Install_EPEL (){
-    yum install -y epel-release
+    if rpm -q epel-release >/dev/null ;then
+        echo -e "\e[5m\e[1m epel源已安装！\e[0m"
+    else
+        if [ ${net_stat} == "yes" ];then
+            yum install -y epel-release
+        else 
+            echo -e ${Echo_net_err}
+        fi
+    fi
 }
 
 Close_selinux (){
@@ -48,8 +57,9 @@ Set_IP (){
     Host_conf=$(find /etc/sysconfig/network-scripts/ -type f -name "ifcfg-*" \
     | grep -v "lo" | grep -v ".*\.bak" | sort | head -1 | xargs basename)
     Device=$(echo ${Host_conf} |  cut -d'-' -f2)
+    
     echo "
-    E.g:
+    示例(重点IP,掩码,网关):
         TYPE=Ethernet
         DEVICE=${Device}
         BOOTPROTO=static
@@ -68,6 +78,7 @@ Add_user (){
     User_list="/root/Add_user.txt"
     read -p '输入用户名：' User_name
     id ${User_name} &> /dev/null
+    
     if [ $? -eq 0 ];then
         echo "用户 ${User_name} 已存在。" #&& exit 5
     else
@@ -80,6 +91,7 @@ Add_user (){
 Set_sudo (){
     read -p '输入需要sudo权限的用户名：' Sudo_user
     id ${Sudo_user} &>/dev/null 
+    
     if [ $? -eq 0 ] ;then
         echo "${Sudo_user}  ALL=(ALL)   NOPASSWD: ALL " >> /etc/sudoers && echo "sudo用户 ${Sudo_user} 添加成功"
     else
@@ -88,18 +100,72 @@ Set_sudo (){
 }
 
 Yum_package (){
-    read -p "输入需要安装的程序包，空格隔开：" Package
-    yum install -y ${Package}
+    if [ ${net_stat} == "yes" ];then
+        read -p "输入需要安装的程序包，空格隔开：" Package
+        yum install -y ${Package}
+    else 
+        echo -e ${Echo_net_err}
+    fi
 }
 
 Set_date_timezone (){
-	timedatectl set-timezone Asia/Shanghai
-	if rpm -q ntpdate;then
-		ntpdate ntp3.aliyun.com && clock -w
-	else
-		yum install ntpdate -y && ntpdate ntp3.aliyun.com && clock -w
-	fi
+    if [ ${net_stat} == "yes" ];then
+        timedatectl set-timezone Asia/Shanghai
+        if rpm -q ntpdate;then
+            ntpdate ntp3.aliyun.com && clock -w
+        else
+            yum install ntpdate -y && ntpdate ntp3.aliyun.com && clock -w
+        fi
+    else 
+        echo -e ${Echo_net_err} 
+    fi
 }
+
+Set_aliyun_repofile (){
+    cd /etc/yum.repos.d
+    RepoFile=$(ls /etc/yum.repos.d | grep -v "epel")
+    
+    if [ ${net_stat} == "yes" ];then
+        if [ ! -f CentOS7-Base-Aliyun.repo ] ;then
+                for File in ${RepoFile}
+                do
+                    mv $File ${File}.bak
+                    #echo $File
+                    #sleep 1
+                done
+        curl -o /etc/yum.repos.d/CentOS7-Base-Aliyun.repo http://mirrors.aliyun.com/repo/Centos-7.repo && \
+        yum clean all && yum makecache 
+        else
+            echo -e "\e[5m\e[1m阿里云repo已配置！\e[0m"
+        fi
+    else
+        echo -e ${Echo_net_err}
+    fi     
+}
+
+Set_firewalld (){
+    Switch_firewalld(){
+        read -p "输入需要放行的端口(如: 80/tcp 或 161/udp)：" On_port
+        firewall-cmd --permanent --add-port=${On_port} && \
+        firewall-cmd --reload
+    }
+
+    if [ ${net_stat} == "yes" ];then
+        if ! rpm -q firewalld >/dev/null ;then
+            yum install -y firewalld
+        fi
+       
+        if firewall-cmd --state ;then
+            Switch_firewalld
+        else
+            systemctl start firewalld && systemctl enable firewalld 
+            Switch_firewalld
+        fi
+    else 
+        echo -e ${Echo_net_err}
+    fi
+}
+
 
 while :;
 do
@@ -113,8 +179,10 @@ do
         #    5. 添加系统用户                              ##
         #    6. 授权sudo用户(sudo执行无需密码)            ##
         #    7. 安装程序包，支持多个                      ##
-        #    8. 同步时间及时                              ##
-        #    9. 按q键退出优化                             ##
+        #    8. 同步时间及时区                            ##
+        #    9. 配置yum源repo文件为阿里云                 ##
+        #    10. 放行防火墙端口                           ##
+        #    11. 按q键退出优化                            ##
         ####################################################
         \e[0m 
     "
@@ -132,11 +200,7 @@ do
             Close_selinux
             ;;
         4)
-            if [ ${net_stat} == "yes" ];then
-                Install_EPEL
-            else 
-                echo "外网无法访问！" 
-            fi
+            Install_EPEL
             ;;
         5)
             Add_user
@@ -145,24 +209,21 @@ do
             Set_sudo
             ;;
         7)
-            if [ ${net_stat} == "yes" ];then
-                Yum_package
-            else 
-                echo "外网无法访问！" 
-            fi
+            Yum_package
             ;;
         8)
-            if [ ${net_stat} == "yes" ];then
-                Set_date_timezone
-            else 
-                echo "外网无法访问！" 
-            fi
+            Set_date_timezone
             ;;
-        q|9)
-            echo -e "\e[1m 退出脚本！\e[0m \n" 
+        9)
+            Set_aliyun_repofile
+            ;;
+        10)
+            Set_firewalld
+            ;;
+        q|11)
+            echo -e "\e[5m\e[1m 退出脚本！\e[0m \n" 
             exit 0
             ;;
-        
         *)
             echo -e "\e[5m\e[1m无效内容，选择优化项(如:2)或者退出(q)！\e[0m"
             ;;
