@@ -48,7 +48,7 @@ Close_selinux (){
 
 Set_Hostname (){
     HostName=$(hostname)
-    read -p"Set hostname (default hostname: ${HostName}): " HOSTNAME
+    read -p"Set hostname (Default: ${HostName}): " HOSTNAME
     hostnamectl set-hostname ${HOSTNAME:-$(hostname)}
     echo "主机名设置为：$(hostname)"
 }
@@ -166,24 +166,273 @@ Set_firewalld (){
     fi
 }
 
+Install_clamav (){
+    Detect_clamav (){
+        read -p "输入要查杀的目录(如：/var )：" Detect_doc
+        echo "更新程序中..."
+        freshclam && clamscan -vri "${Detect_doc:-'/etc'}" -l /tmp/clamscan-$(date +%F).log && \
+        echo -e "\e[1m可查看文件 /tmp/clamscan-$(date +%F).log \e[0m"
+     }
+     
+    if [ ${net_stat} == "yes" ];then
+        if rpm -q clamav >/dev/null ;then
+            Detect_clamav
+            #echo -e "\e[5m\e[1mClamAV 已经安装！\e[0m"
+        else
+            yum install -y epel-release && yum install -y clamav
+            Detect_clamav
+        fi
+    else 
+            echo -e ${Echo_net_err}
+    fi
+}
+
+System_info (){
+sysversion=$(rpm -q centos-release|cut -d- -f3)
+line="
+-------------------------------------------------
+"
+#[ -d logs ] || mkdir logs
+#Syslogs=sysinfo-logs
+#mkdir -p ${Syslogs}
+#sys_check_file="${Syslogs}/$(ip a show dev eth0|grep -w inet|awk '{print $2}'|awk -F '/' '{print $1}')-`date +%Y%m%d`.txt"
+sys_check_file="$(ip a show dev eth0|grep -w inet|awk '{print $2}'|awk -F '/' '{print $1}')-`date +%Y%m%d`.txt"
+    
+# 获取系统cpu信息
+function get_cpu_info() {
+    Physical_CPUs=$(grep "physical id" /proc/cpuinfo| sort | uniq | wc -l)
+    Virt_CPUs=$(grep "processor" /proc/cpuinfo | wc -l)
+    CPU_Kernels=$(grep "cores" /proc/cpuinfo|uniq| awk -F ': ' '{print $2}')
+    CPU_Type=$(grep "model name" /proc/cpuinfo | awk -F ': ' '{print $2}' | sort | uniq)
+    CPU_Arch=$(uname -m)
+    #cat <<EOF
+    echo "
+CPU信息:
+
+物理CPU个数: $Physical_CPUs
+逻辑CPU个数: $Virt_CPUs
+每CPU核心数: $CPU_Kernels
+CPU型号: $CPU_Type
+CPU架构: $CPU_Arch
+    "
+}
+
+# 获取系统内存信息
+function get_mem_info() {
+    check_mem=$(free -m)
+    MemTotal=$(grep MemTotal /proc/meminfo| awk '{print $2}')  #KB
+    MemFree=$(grep MemFree /proc/meminfo| awk '{print $2}')    #KB
+    let MemUsed=MemTotal-MemFree
+    MemPercent=$(awk "BEGIN {if($MemTotal==0){printf 100}else{printf \"%.2f\",$MemUsed*100/$MemTotal}}")
+    report_MemTotal="$((MemTotal/1024))""MB"        #内存总容量(MB)
+    report_MemFree="$((MemFree/1024))""MB"          #内存剩余(MB)
+    report_MemUsedPercent="$(awk "BEGIN {if($MemTotal==0){printf 100}else{printf \"%.2f\",$MemUsed*100/$MemTotal}}")""%"   #内存使用率%
+    
+    echo "
+内存信息(MB)：
+${check_mem}
+"
+}
+
+# 获取系统网络信息
+function get_net_info() {
+    pri_ipadd=$(ip a show dev eth0|grep -w inet|awk '{print $2}'|awk -F '/' '{print $1}')
+    #pub_ipadd=$(curl ifconfig.me -s)
+    gateway=$(ip route | grep default | awk '{print $3}')
+    mac_info=$(ip link| egrep -v "lo"|grep link|awk '{print $2}')
+    dns_config=$(egrep -v "^$|^#" /etc/resolv.conf)
+    route_info=$(ip route)
+    #route_info=$(route -n)
+    echo "
+IP信息:
+
+系统公网地址: ${pub_ipadd}
+系统私网地址: ${pri_ipadd}
+网关地址: ${gateway}
+MAC地址: ${mac_info}
+
+路由信息:
+${route_info}
+
+DNS 信息:
+${dns_config}
+"
+}
+
+# 获取系统磁盘信息
+function get_disk_info() {
+    disk_info=$(fdisk -l|grep "Disk /dev"|cut -d, -f1)
+    disk_use=$(df -hTP|awk '$2!="tmpfs"{print}')
+    disk_inode=$(df -hiP|awk '$1!="tmpfs"{print}')
+    
+    echo "
+磁盘信息:
+${disk_info}
+
+磁盘使用:
+${disk_use}
+
+inode信息:
+${disk_inode}
+    "
+}
+
+# 获取系统信息
+function get_systatus_info() {
+    sys_os=$(uname -o)
+    sys_release=$(cat /etc/redhat-release)
+    sys_kernel=$(uname -r)
+    sys_hostname=$(hostname)
+    sys_selinux=$(getenforce)
+    sys_lang=$(echo $LANG)
+    sys_lastreboot=$(who -b | awk '{print $3,$4}')
+    sys_runtime=$(uptime |awk '{print  $3,$4}'|cut -d, -f1)
+    sys_time=$(date)
+    sys_load=$(uptime |cut -d: -f5)
+
+    echo "
+系统信息:
+
+系统: ${sys_os}
+发行版本:   ${sys_release}
+系统内核:   ${sys_kernel}
+主机名:    ${sys_hostname}
+selinux状态:  ${sys_selinux}
+系统语言:   ${sys_lang}
+系统当前时间: ${sys_time}
+系统最后重启时间:   ${sys_lastreboot}
+系统运行时间: ${sys_runtime}
+系统负载:   ${sys_load}
+    "
+}
+
+# 获取服务信息
+function get_service_info() {
+    #port_listen=$(netstat -lntup|grep -v "Active Internet")
+    port_listen=$(ss -lut)
+    kernel_config=$(sysctl -p 2>/dev/null)
+    if [ ${sysversion} -gt 6 ];then
+        service_config=$(systemctl list-unit-files --type=service --state=enabled|grep "enabled")
+        run_service=$(systemctl list-units --type=service --state=running |grep ".service")
+    else
+        service_config=$(/sbin/chkconfig | grep -E ":on|:启用" |column -t)
+        run_service=$(/sbin/service --status-all|grep -E "running")
+    fi
+    echo "
+服务启动配置:
+
+${service_config}
+${line}
+运行的服务:
+
+${run_service}
+${line}
+监听端口:
+
+${port_listen}
+${line}
+内核参考配置:
+
+${kernel_config}
+    "
+}
+
+function get_sys_user() {
+    login_user=$(awk -F: '{if ($NF=="/bin/bash") print $0}' /etc/passwd)
+    ssh_config=$(egrep -v "^#|^$" /etc/ssh/sshd_config)
+    sudo_config=$(egrep -v "^#|^$" /etc/sudoers |grep -v "^Defaults")
+    host_config=$(egrep -v "^#|^$" /etc/hosts)
+    crond_config=$(for cronuser in /var/spool/cron/* ;do ls ${cronuser} 2>/dev/null|cut -d/ -f5;egrep -v "^$|^#" ${cronuser} 2>/dev/null;echo "";done)
+    echo "
+系统登录用户:
+
+${login_user}
+${line}
+ssh 配置信息:
+
+${ssh_config}
+${line}
+sudo 配置用户:
+
+${sudo_config}
+${line}
+定时任务配置:
+
+${crond_config}
+${line}
+hosts 信息:
+
+${host_config}
+    "
+}
+
+function process_top_info() {
+
+    top_title=$(top -b n1|head -7|tail -1)
+    cpu_top10=$(top b -n1 | head -17 | tail -11)
+    mem_top10=$(top -b n1|head -17|tail -10|sort -k10 -r)
+    
+    echo "
+CPU占用top10:
+
+${top_title}
+${cpu_top10}
+${line}
+内存占用top10:
+
+${top_title}
+${mem_top10}
+"
+}
+
+
+function sys_check() {
+    echo "系统信息如下："
+    echo -e "${line} "
+    get_cpu_info
+    echo -e "${line} "
+    get_mem_info
+    echo -e "${line} "
+    get_net_info
+    echo -e "${line} "
+    get_disk_info
+    echo -e "${line} "
+    get_systatus_info
+    echo -e "${line} "
+    get_service_info
+    echo -e "${line} "
+    get_sys_user
+    echo -e "${line} "
+    process_top_info
+}
+    
+sys_check > ${sys_check_file}
+echo -e "\e[5m\e[1m系统信息收集完毕，查看：${sys_check_file}\e[0m"
+
+}
 
 while :;
 do
     #clear
+    Oneline="------------------------------------------------------------"
     echo -e "\n \e[1m\e[31m
-        ####################################################
-        #    1. 配置首个网卡静态IP地址(ethx)              ##
-        #    2. 设置主机名                                ##    
-        #    3. 关闭SElinux                               ##
-        #    4. 安装EPEL源                                ##
-        #    5. 添加系统用户                              ##
-        #    6. 授权sudo用户(sudo执行无需密码)            ##
-        #    7. 安装程序包，支持多个                      ##
-        #    8. 同步时间及时区                            ##
-        #    9. 配置yum源repo文件为阿里云                 ##
-        #    10. 放行防火墙端口                           ##
-        #    11. 按q键退出优化                            ##
-        ####################################################
+        ############## CentOS7系统优化 ####################
+        #                                                 #
+        #      1. 配置首个网卡静态IP地址(ethx)            #
+        #      2. 设置主机名                              #
+        #      3. 关闭SElinux                             #
+        #      4. 安装EPEL源                              #
+        #      5. 添加系统用户                            #
+        #      6. 授权sudo用户(sudo执行无需密码)          #
+        #      7. 安装程序包，支持多个                    #
+        #      8. 同步时间及时区                          #
+        #      9. 配置yum源repo文件为阿里云               #
+        #     10. 放行防火墙端口                          #
+        #     11. 安装ClamAV杀毒软件并查杀                #
+        #     12. 收集系统信息                            #
+        #     13. 按q键退出优化                           #
+        #                                                 #
+        ###################################################
         \e[0m 
     "
     read -p '按q键退出，选择优化项: ' Select
@@ -192,41 +441,57 @@ do
     case $Select in
         1)
             Set_IP
+            echo "$Oneline"
             ;;
         2)
             Set_Hostname
+            echo "$Oneline"
             ;;
         3)
             Close_selinux
+            echo "$Oneline"
             ;;
         4)
             Install_EPEL
+            echo "$Oneline"
             ;;
         5)
             Add_user
+            echo "$Oneline"
             ;;
         6)
             Set_sudo
+            echo "$Oneline"
             ;;
         7)
             Yum_package
+            echo "$Oneline"
             ;;
         8)
             Set_date_timezone
+            echo "$Oneline"
             ;;
         9)
             Set_aliyun_repofile
+            echo "$Oneline"
             ;;
         10)
             Set_firewalld
+            echo "$Oneline"
             ;;
-        q|11)
+        11)
+            Install_clamav
+            echo "$Oneline"
+            ;;
+        12)
+            System_info
+            echo "$Oneline"
+            ;;
+        q|13)
             echo -e "\e[5m\e[1m 退出脚本！\e[0m \n" 
-            exit 0
-            ;;
+            exit 0 ;;
         *)
-            echo -e "\e[5m\e[1m无效内容，选择优化项(如:2)或者退出(q)！\e[0m"
-            ;;
+            echo -e "\e[5m\e[1m无效内容，选择优化项(如:2)或者退出(q)！\e[0m" ;;
     esac
 done
 
