@@ -1,7 +1,7 @@
 #!/bin/bash
 #CentOS7优化
 #tudou314
-#2019-09-12
+#2019-03-13
 
 
 #[ $(id -u) != "0" ] && echo "必须是 root 权限!" && exit 1
@@ -18,22 +18,25 @@ fi
 Date=$(date +%F_%T)
 Echo_net_err="\e[5m\e[1m 外网无法访问！\e[0m"
 
-Test_net (){
+Check_net (){
     echo -e "\n 请稍等，正在检测网络环境..."
-    ping -w2 -c2 223.5.5.5 &>/dev/null && net_stat=yes || net_stat=no
+    ping -w3 -c2 223.5.5.5 &>/dev/null && net_stat=yes || net_stat=no
     if [ ${net_stat} = "no" ];then
-        echo "外网IP：223.5.5.5 无法访问，安装程序需要时访问网络"
+        echo -e "\e[1m外网IP：223.5.5.5 无法访问，安装程序需要时访问网络!\e[0m"
         sleep 5
     fi
 }
-Test_net
+Check_net
 
 Install_EPEL (){
-    if rpm -q epel-release >/dev/null ;then
+    #if rpm -q epel-release >/dev/null ;then
+    if [ -f /etc/yum.repos.d/epel.repo ] ;then
         echo -e "\e[5m\e[1m epel源已安装！\e[0m"
     else
         if [ ${net_stat} == "yes" ];then
-            yum install -y epel-release
+            #yum install -y epel-release
+            curl -o /etc/yum.repos.d/epel.repo http://mirrors.aliyun.com/repo/epel-7.repo && \
+            echo -e "\e[5m\e[1mepel源安装完成！\e[0m"
         else 
             echo -e ${Echo_net_err}
         fi
@@ -123,7 +126,7 @@ Set_date_timezone (){
 
 Set_aliyun_repofile (){
     cd /etc/yum.repos.d
-    RepoFile=$(ls /etc/yum.repos.d | grep -v "epel")
+    RepoFile=$(ls /etc/yum.repos.d | grep -v "epel" | grep -v ".*\.bak")
     
     if [ ${net_stat} == "yes" ];then
         if [ ! -f CentOS7-Base-Aliyun.repo ] ;then
@@ -140,7 +143,8 @@ Set_aliyun_repofile (){
         fi
     else
         echo -e ${Echo_net_err}
-    fi     
+    fi
+    cd - >/dev/null
 }
 
 Set_firewalld (){
@@ -184,6 +188,70 @@ Install_clamav (){
         fi
     else 
             echo -e ${Echo_net_err}
+    fi
+}
+
+Install_zabbix_agent (){
+    sys_release=$(cat /etc/redhat-release  | cut -d'.' -f1 | awk '{print $NF}')
+    ZBX_SRV_IP="127.0.0.1,172.16.16.28"
+    Host_ip=$(hostname -I | cut -d' ' -f1)
+    Err_sys_release=55
+    Zabbix_agent_exist=56
+
+    #配置时区信息
+    date_timezone_set (){
+        ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+        if rpm -q ntpdate;then
+            ntpdate ntp3.aliyun.com && clock -w
+        else
+            yum install ntpdate -y && ntpdate ntp3.aliyun.com && clock -w
+        fi
+    }
+
+    #修改zabbix agent 配置
+    zbx_agent_conf (){
+        sed -i "s%ServerActive=127.0.0.1%ServerActive=${ZBX_SRV_IP}%g" /etc/zabbix/zabbix_agentd.conf
+        sed -i "s%Server=127.0.0.1%Server=${ZBX_SRV_IP}%g" /etc/zabbix/zabbix_agentd.conf
+        #sed -i "s%Hostname=Zabbix server%Hostname=${HOSTNAME}%g" /etc/zabbix/zabbix_agentd.conf
+    }
+
+    #开启服务CentOS7环境
+    zbx_agent_on_7 (){
+        systemctl enable zabbix-agent
+        systemctl start zabbix-agent
+    }
+
+    #设置FW，CentOS7环境
+    zbx_agent_fw_on_7 (){
+        if rpm -q firewalld;then
+            #图形界面 yum install firewall-config -y
+            if systemctl status firewalld | grep -q "active (running)" ;then
+                firewall-cmd --add-service=zabbix-agent --permanent
+                firewall-cmd --reload
+            fi
+        fi
+    }
+
+    #判断zabbix agent是否已安装
+    if rpm -q zabbix-agent &>/dev/null;then
+        echo "zabbix agent似乎已经安装，请检查" #&& exit ${Zabbix_agent_exist}
+    fi
+
+    #设置时间，时区
+    if [ ${net_stat} == yes ];then
+        date_timezone_set
+    else 
+        echo "请检查网络环境..." #&& exit ${Err_net}
+    fi
+
+    #检查系统版本
+    if [ ${sys_release} -eq 7 ] ;then
+        timedatectl set-timezone Asia/Shanghai
+        rpm -ivh https://mirrors.aliyun.com/zabbix/zabbix/3.2/rhel/7/x86_64/zabbix-agent-3.2.9-1.el7.x86_64.rpm
+        zbx_agent_conf && zbx_agent_fw_on_7 && zbx_agent_on_7 && \
+        echo -e "\e[5m\e[1mZabbix客户端安装完成！\e[0m"
+    else
+        echo "请确认系统环境是CentOS" #&& exit ${Err_sys_release}
     fi
 }
 
@@ -407,7 +475,7 @@ function sys_check() {
 }
     
 sys_check > ${sys_check_file}
-echo -e "\e[5m\e[1m系统信息收集完毕，查看：${sys_check_file}\e[0m"
+echo -e "\e[5m\e[1m系统信息收集完毕，查看：$(pwd)/${sys_check_file}\e[0m"
 
 }
 
@@ -429,8 +497,9 @@ do
         #      9. 配置yum源repo文件为阿里云               #
         #     10. 放行防火墙端口                          #
         #     11. 安装ClamAV杀毒软件并查杀                #
-        #     12. 收集系统信息                            #
-        #     13. 按q键退出优化                           #
+        #     12. 安装Zabbix客户端                        #
+        #     13. 收集系统信息                            #
+        #     14. 按q键退出优化                           #
         #                                                 #
         ###################################################
         \e[0m 
@@ -484,10 +553,14 @@ do
             echo "$Oneline"
             ;;
         12)
+            Install_zabbix_agent
+            echo "$Oneline"
+            ;;
+        13)
             System_info
             echo "$Oneline"
             ;;
-        q|13)
+        q|14)
             echo -e "\e[5m\e[1m 退出脚本！\e[0m \n" 
             exit 0 ;;
         *)
