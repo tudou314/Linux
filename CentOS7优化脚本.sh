@@ -6,7 +6,7 @@
 
 #[ $(id -u) != "0" ] && echo "必须是 root 权限!" && exit 1
 if [ $(id -u) -ne  0 ] ;then
-        echo "必须是 root 权限!" && exit 1
+    echo "必须是 root 权限!" && exit 1
 fi
 
 #检查系统版本
