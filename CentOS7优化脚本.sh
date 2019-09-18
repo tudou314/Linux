@@ -6,7 +6,8 @@
 
 #[ $(id -u) != "0" ] && echo "必须是 root 权限!" && exit 1
 if [ $(id -u) -ne  0 ] ;then
-    echo "必须是 root 权限!" && exit 1
+
+        echo "必须是 root 权限!" && exit 1
 fi
 
 #检查系统版本
@@ -15,18 +16,19 @@ if ! cat /etc/redhat-release  | cut -d'.' -f1 | egrep -q 7 ;then
 fi
 
 #Host_IP=$(ip addr|grep "inet " | grep -v 127.0.0.1 | awk '{print $2}'|cut -d/ -f1)
+Host_ip=$(hostname -I | cut -d' ' -f1)
 Date=$(date +%F_%T)
-Echo_net_err="\e[5m\e[1m 外网无法访问！\e[0m"
+Echo_net_err="\e[5m\e[1m 阿里云域名无法访问，请检查网络！\e[0m"
 
 Check_net (){
     echo -e "\n 请稍等，正在检测网络环境..."
-    ping -w3 -c2 223.5.5.5 &>/dev/null && net_stat=yes || net_stat=no
+    ping -w3 -c3 aliyun.com &>/dev/null && net_stat=yes || net_stat=no
     if [ ${net_stat} = "no" ];then
         echo -e "\e[1m外网IP：223.5.5.5 无法访问，安装程序需要时访问网络!\e[0m"
-        sleep 5
+        sleep 4
     fi
 }
-Check_net
+Check_net 
 
 Install_EPEL (){
     #if rpm -q epel-release >/dev/null ;then
@@ -46,7 +48,7 @@ Install_EPEL (){
 Close_selinux (){
     sed -i "s/SELINUX=enforcing/SELINUX=permissive/"  /etc/selinux/config
     setenforce 0
-    echo "SElinux 已关闭！"
+    echo -e "\e[5m\e[1mSElinux 已关闭！\e[0m"
 }
 
 Set_Hostname (){
@@ -93,12 +95,22 @@ Add_user (){
 
 Set_sudo (){
     read -p '输入需要sudo权限的用户名：' Sudo_user
-    id ${Sudo_user} &>/dev/null 
     
-    if [ $? -eq 0 ] ;then
-        echo "${Sudo_user}  ALL=(ALL)   NOPASSWD: ALL " >> /etc/sudoers && echo "sudo用户 ${Sudo_user} 添加成功"
+    if [ ${Sudo_user} ];then        
+        id ${Sudo_user} &>/dev/null && User_exist=yes || User_exist=no
+        
+        if [ ${User_exist} == "yes" ] ;then
+            #grep "^\${Sudo_user}.*ALL$" /etc/sudoers
+            if egrep -v "#|^$" /etc/sudoers | grep "ALL[ ]*$" | grep ${Sudo_user} ;then
+                echo -e "\e[5m\e[1msudo用户 ${Sudo_user} 已存在！\e[0m"
+            else
+                echo "${Sudo_user}  ALL=(ALL)   NOPASSWD: ALL" >> /etc/sudoers && echo "sudo用户 ${Sudo_user} 添加成功"
+            fi
+        else
+            echo -e "\e[5m\e[1m用户 ${Sudo_user} 不存在！\e[0m"
+        fi
     else
-        echo "用户 ${Sudo_user} 不存在！"
+        echo -e "\e[5m\e[1m未输入！\e[0m"
     fi
 }
 
@@ -192,15 +204,16 @@ Install_clamav (){
 }
 
 Install_zabbix_agent (){
-    sys_release=$(cat /etc/redhat-release  | cut -d'.' -f1 | awk '{print $NF}')
+#    sys_release=$(cat /etc/redhat-release  | cut -d'.' -f1 | awk '{print $NF}')
     ZBX_SRV_IP="127.0.0.1,172.16.16.28"
-    Host_ip=$(hostname -I | cut -d' ' -f1)
-    Err_sys_release=55
-    Zabbix_agent_exist=56
+#    Host_ip=$(hostname -I | cut -d' ' -f1)
+#    Err_sys_release=55
+#    Zabbix_agent_exist=56
 
     #配置时区信息
     date_timezone_set (){
-        ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+        #ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+        timedatectl set-timezone Asia/Shanghai
         if rpm -q ntpdate;then
             ntpdate ntp3.aliyun.com && clock -w
         else
@@ -226,7 +239,8 @@ Install_zabbix_agent (){
         if rpm -q firewalld;then
             #图形界面 yum install firewall-config -y
             if systemctl status firewalld | grep -q "active (running)" ;then
-                firewall-cmd --add-service=zabbix-agent --permanent
+                #firewall-cmd --add-service=zabbix-agent --permanent
+                firewall-cmd --add-port=10050/tcp --permanent
                 firewall-cmd --reload
             fi
         fi
@@ -234,24 +248,14 @@ Install_zabbix_agent (){
 
     #判断zabbix agent是否已安装
     if rpm -q zabbix-agent &>/dev/null;then
-        echo "zabbix agent似乎已经安装，请检查" #&& exit ${Zabbix_agent_exist}
-    fi
-
-    #设置时间，时区
-    if [ ${net_stat} == yes ];then
-        date_timezone_set
-    else 
-        echo "请检查网络环境..." #&& exit ${Err_net}
-    fi
-
-    #检查系统版本
-    if [ ${sys_release} -eq 7 ] ;then
-        timedatectl set-timezone Asia/Shanghai
-        rpm -ivh https://mirrors.aliyun.com/zabbix/zabbix/3.2/rhel/7/x86_64/zabbix-agent-3.2.9-1.el7.x86_64.rpm
+        echo -e "\e[5m\e[1mzabbix agent似乎已经安装，请检查配置! \e[0m" #&& exit ${Zabbix_agent_exist}
+        echo "------------------------------------------------------------"
+        continue
+    else
+        date_timezone_set  && \
+        rpm -ivh https://mirrors.aliyun.com/zabbix/zabbix/3.2/rhel/7/x86_64/zabbix-agent-3.2.9-1.el7.x86_64.rpm && \
         zbx_agent_conf && zbx_agent_fw_on_7 && zbx_agent_on_7 && \
         echo -e "\e[5m\e[1mZabbix客户端安装完成！\e[0m"
-    else
-        echo "请确认系统环境是CentOS" #&& exit ${Err_sys_release}
     fi
 }
 
@@ -453,7 +457,6 @@ ${mem_top10}
 "
 }
 
-
 function sys_check() {
     echo "系统信息如下："
     echo -e "${line} "
@@ -479,10 +482,13 @@ echo -e "\e[5m\e[1m系统信息收集完毕，查看：$(pwd)/${sys_check_file}\
 
 }
 
+Main_config() {
 while :;
 do
     #clear
     Oneline="------------------------------------------------------------"
+    
+    Title (){
     echo -e "\n \e[1m\e[31m
         ############## CentOS7系统优化 ####################
         #                                                 #
@@ -504,6 +510,9 @@ do
         ###################################################
         \e[0m 
     "
+    }
+    Title
+    
     read -p '按q键退出，选择优化项: ' Select
     echo ""
     #read -p '选择优化项：' Select
@@ -511,61 +520,77 @@ do
         1)
             Set_IP
             echo "$Oneline"
+            sleep 3
             ;;
         2)
             Set_Hostname
             echo "$Oneline"
+            sleep 3
             ;;
         3)
             Close_selinux
             echo "$Oneline"
+            sleep 3
             ;;
         4)
             Install_EPEL
             echo "$Oneline"
+            sleep 3
             ;;
         5)
             Add_user
             echo "$Oneline"
+            sleep 3
             ;;
         6)
             Set_sudo
             echo "$Oneline"
+            sleep 3
             ;;
         7)
             Yum_package
             echo "$Oneline"
+            sleep 3
             ;;
         8)
             Set_date_timezone
             echo "$Oneline"
+            sleep 3
             ;;
         9)
             Set_aliyun_repofile
             echo "$Oneline"
+            sleep 3
             ;;
         10)
             Set_firewalld
             echo "$Oneline"
+            sleep 3
             ;;
         11)
             Install_clamav
             echo "$Oneline"
+            sleep 3
             ;;
         12)
             Install_zabbix_agent
             echo "$Oneline"
+            sleep 3
             ;;
         13)
             System_info
             echo "$Oneline"
+            sleep 3
             ;;
         q|14)
             echo -e "\e[5m\e[1m 退出脚本！\e[0m \n" 
             exit 0 ;;
         *)
-            echo -e "\e[5m\e[1m无效内容，选择优化项(如:2)或者退出(q)！\e[0m" ;;
+            echo -e "\e[5m\e[1m无效内容，选择优化项(如:2)或者退出(q)！\e[0m" 
+            sleep 3
+            ;;
     esac
 done
+}
 
-
+Main_config
