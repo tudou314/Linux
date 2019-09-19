@@ -259,6 +259,42 @@ Install_zabbix_agent (){
     fi
 }
 
+Set_motd (){
+    Check_motd=$(wc -w /etc/motd | cut -d' ' -f1)
+    if [ ${Check_motd} -eq 0 ] ;then
+        read -p "输入系统登录后提示语(默认为主机名与IP地址)：" Host_motd
+        if [ yes"${Host_motd}" != yes ];then
+            echo "
+
+            ###############################
+            ##
+            ##       ${Host_motd}
+            ##                  
+            ##                  
+            ###############################
+            " >/etc/motd && \
+            echo -e "\e[5m\e[1m自定义登录提示语添加成功！\e[0m" && \
+            cat /etc/motd
+        else
+            echo "
+
+            ###############################
+            ##          
+            ##       $(hostname)
+            ##       ${Host_motd:-$(hostname -I | cut -d' ' -f1)}
+            ##                  
+            ##                  
+            ###############################
+            " >/etc/motd && \
+            echo -e "\e[5m\e[1m默认登录提示语添加成功！\e[0m" && \
+            cat /etc/motd
+        fi
+    else
+        echo -e "\e[5m\e[1m登录提示语已存在！\e[0m" && \
+        cat /etc/motd 
+    fi
+}
+
 System_info (){
 sysversion=$(rpm -q centos-release|cut -d- -f3)
 line="
@@ -504,8 +540,9 @@ do
         #     10. 放行防火墙端口                          #
         #     11. 安装ClamAV杀毒软件并查杀                #
         #     12. 安装Zabbix客户端                        #
-        #     13. 收集系统信息                            #
-        #     14. 按q键退出优化                           #
+        #     13. 设置系统登录提示语                      #
+        #     14. 收集系统信息                            #
+        #     15. 按q键退出优化                           #
         #                                                 #
         ###################################################
         \e[0m 
@@ -578,11 +615,16 @@ do
             sleep 3
             ;;
         13)
+            Set_motd
+            echo "$Oneline"
+            sleep 3
+            ;;
+        14)
             System_info
             echo "$Oneline"
             sleep 3
             ;;
-        q|14)
+        q|15)
             echo -e "\e[5m\e[1m 退出脚本！\e[0m \n" 
             exit 0 ;;
         *)
