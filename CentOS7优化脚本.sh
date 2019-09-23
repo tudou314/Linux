@@ -79,6 +79,26 @@ Set_IP (){
     vi /etc/sysconfig/network-scripts/${Host_conf}
 }
 
+Update_sys (){
+    #vi /etc/yum.conf  在[main]的最后添加
+    #exclude=kernel*  
+    #exclude=centos-release*
+    grep -q '^exclude=centos-release' /etc/yum.conf && grep -q '^exclude=kernel' /etc/yum.conf
+    if [ $? -ne 0 ];then
+        sed -i '/\[main\]/a\exclude=kernel*' /etc/yum.conf &&  sed -i '/\[main\]/a\exclude=centos-release*' /etc/yum.conf  && \
+        echo -e "\e[5m\e[1m已设置排除内核更新！\e[0m"
+    fi
+    
+    read -p "选择是否开始更新(y|n)；"  Cha_update
+    case ${Cha_update} in
+        y|Y)
+            yum update ;;
+        n|N)
+            echo -e "\e[5m\e[1m已选择跳过升级程序包！\e[0m" ;;
+         *)
+            echo -e "\e[5m\e[1m输入错误！\e[0m" ;;
+    esac
+
 Add_user (){
     User_list="/root/Add_user.txt"
     read -p '输入用户名：' User_name
@@ -265,7 +285,6 @@ Set_motd (){
         read -p "输入系统登录后提示语(默认为主机名与IP地址)：" Host_motd
         if [ yes"${Host_motd}" != yes ];then
             echo "
-
             ###############################
             ##
             ##       ${Host_motd}
@@ -541,8 +560,9 @@ do
         #     11. 安装ClamAV杀毒软件并查杀                #
         #     12. 安装Zabbix客户端                        #
         #     13. 设置系统登录提示语                      #
-        #     14. 收集系统信息                            #
-        #     15. 按q键退出优化                           #
+        #     14. 更新程序包(排除内核)                    #
+        #     15. 收集系统信息                            #
+        #     16. 按q键退出优化                           #
         #                                                 #
         ###################################################
         \e[0m 
@@ -620,11 +640,16 @@ do
             sleep 3
             ;;
         14)
+            Update_sys
+            echo "$Oneline"
+            sleep 3
+            ;;
+        15)
             System_info
             echo "$Oneline"
             sleep 3
             ;;
-        q|15)
+        q|16)
             echo -e "\e[5m\e[1m 退出脚本！\e[0m \n" 
             exit 0 ;;
         *)
