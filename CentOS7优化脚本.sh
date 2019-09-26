@@ -98,7 +98,8 @@ Update_sys (){
          *)
             echo -e "\e[5m\e[1m输入错误！\e[0m" ;;
     esac
-
+}
+    
 Add_user (){
     User_list="/root/Add_user.txt"
     read -p '输入用户名：' User_name
@@ -311,6 +312,33 @@ Set_motd (){
     else
         echo -e "\e[5m\e[1m登录提示语已存在！\e[0m" && \
         cat /etc/motd 
+    fi
+}
+
+Anti_crack_sshd (){
+    if [ ${net_stat} == "yes" ];then
+        if [ -f /etc/init.d/daemon-control-denyhosts ] ;then
+            echo -e "
+                \e[1m防暴力破解程序Denyhosts已经安装！
+            如需重新安装请删除 /etc/init.d/daemon-control-denyhosts 
+            以及 /usr/share/denyhosts等文件
+            \e[0m"
+        else
+            wget -O DenyHosts-2.6.tar.gz -c -t 3 'https://sourceforge.net/projects/denyhosts/files/latest/download'  && \
+            tar zxvf DenyHosts-2.6.tar.gz && \
+            cd DenyHosts-2.6 && \
+            python setup.py install && \
+            cd /usr/share/denyhosts/ && \
+            cp denyhosts.cfg-dist denyhosts.cfg && \
+            cp daemon-control-dist daemon-control && \
+            ln -s /usr/share/denyhosts/daemon-control /etc/init.d/daemon-control-denyhosts && \
+            sed -i 's/DENY_THRESHOLD_ROOT = 1/DENY_THRESHOLD_ROOT = 6/g' /usr/share/denyhosts/denyhosts.cfg && \
+            sed -i 's/HOSTNAME_LOOKUP=YES/HOSTNAME_LOOKUP=NO/g' /usr/share/denyhosts/denyhosts.cfg && \
+            /etc/init.d/daemon-control-denyhosts start && \
+            echo -e "\e[5m\e[1m防暴力破解程序Denyhosts安装成功！/etc/init.d/daemon-control-denyhosts \e[0m" || echo -e "\e[5m\e[1m安装失败，请查看原因！\e[0m"
+        fi
+    else 
+                echo -e ${Echo_net_err}
     fi
 }
 
