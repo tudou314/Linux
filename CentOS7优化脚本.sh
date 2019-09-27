@@ -2,7 +2,7 @@
 #CentOS7优化
 #tudou314
 #2019-03-13
-
+set -e
 
 #[ $(id -u) != "0" ] && echo "必须是 root 权限!" && exit 1
 if [ $(id -u) -ne  0 ] ;then
@@ -206,8 +206,8 @@ Set_firewalld (){
 Install_clamav (){
     Detect_clamav (){
         read -p "输入要查杀的目录(如：/var )：" Detect_doc
-        echo "更新程序中..."
-        freshclam && clamscan -vri "${Detect_doc:-'/etc'}" -l /tmp/clamscan-$(date +%F).log && \
+        echo "更新程序中(第一次会较慢)..."
+        freshclam && clamscan -ri "${Detect_doc:-'/etc'}" -l /tmp/clamscan-$(date +%F).log && \
         echo -e "\e[1m可查看文件 /tmp/clamscan-$(date +%F).log \e[0m"
      }
      
@@ -324,7 +324,7 @@ Anti_crack_sshd (){
             以及 /usr/share/denyhosts等文件
             \e[0m"
         else
-            wget -O DenyHosts-2.6.tar.gz -c -t 3 'https://sourceforge.net/projects/denyhosts/files/latest/download'  && \
+            curl -o DenyHosts-2.6.tar.gz https://sourceforge.net/projects/denyhosts/files/latest/download && \
             tar zxvf DenyHosts-2.6.tar.gz && \
             cd DenyHosts-2.6 && \
             python setup.py install && \
@@ -334,9 +334,25 @@ Anti_crack_sshd (){
             ln -s /usr/share/denyhosts/daemon-control /etc/init.d/daemon-control-denyhosts && \
             sed -i 's/DENY_THRESHOLD_ROOT = 1/DENY_THRESHOLD_ROOT = 6/g' /usr/share/denyhosts/denyhosts.cfg && \
             sed -i 's/HOSTNAME_LOOKUP=YES/HOSTNAME_LOOKUP=NO/g' /usr/share/denyhosts/denyhosts.cfg && \
+            chkconfig --add daemon-control-denyhosts && \
             /etc/init.d/daemon-control-denyhosts start && \
             echo -e "\e[5m\e[1m防暴力破解程序Denyhosts安装成功！/etc/init.d/daemon-control-denyhosts \e[0m" || echo -e "\e[5m\e[1m安装失败，请查看原因！\e[0m"
         fi
+    else 
+                echo -e ${Echo_net_err}
+    fi
+}
+
+Install_rkhunter (){
+    if [ ${net_stat} == "yes" ];then
+        cd /opt
+        curl https://sourceforge.net/projects/rkhunter/files/rkhunter/1.4.6/rkhunter-1.4.6.tar.gz/download -o rkhunter-1.4.6.tar.gz && \
+        tar zxf rkhunter-1.4.6.tar.gz && \
+        cd rkhunter-1.4.6
+        ./installer.sh --install && \
+        /usr/local/bin/rkhunter --propupd && \
+        /usr/local/bin/rkhunter -c --sk  || echo -e "\e[5m\e[1mrkhunter安装失败，请查看原因！\e[0m"
+        #自动确认到下一步
     else 
                 echo -e ${Echo_net_err}
     fi
@@ -575,23 +591,23 @@ do
     echo -e "\n \e[1m\e[31m
         ############## CentOS7系统优化 ####################
         #                                                 #
-        #      1. 配置首个网卡静态IP地址(ethx)            #
-        #      2. 设置主机名                              #
-        #      3. 关闭SElinux                             #
-        #      4. 安装EPEL源                              #
-        #      5. 添加系统用户                            #
-        #      6. 授权sudo用户(sudo执行无需密码)          #
-        #      7. 安装程序包，支持多个                    #
-        #      8. 同步时间及时区                          #
-        #      9. 配置yum源repo文件为阿里云               #
-        #     10. 放行防火墙端口                          #
-        #     11. 安装ClamAV杀毒软件并查杀                #
-        #     12. 安装Zabbix客户端                        #
-        #     13. 设置系统登录提示语                      #
-        #     14. 更新程序包(排除内核)                    #
-        #     15. 收集系统信息                            #
-        #     16. 按q键退出优化                           #
-        #                                                 #
+        #       1. 设置主机名                             #
+        #       2. 关闭SElinux                            #
+        #       3. 配置首个网卡静态IP地址(ethx)           #
+        #       4. 同步时间及时区                         #
+        #       5. 设置系统登录提示语                     #
+        #       6. 配置yum源为阿里云                      #
+        #       7. 安装EPEL源                             #
+        #       8. 安装程序包，支持多个                   #
+        #       9. 添加系统用户                           #
+        #      10. 安装Zabbix客户端                       #
+        #      11. 授权sudo用户(sudo执行无需密码)         #
+        #      12. 安装rootkit检查工具                    #
+        #      13. 安装ClamAV杀毒软件并查杀               #
+        #      14. 放行防火墙端口                         #
+        #      15. 更新程序包(排除内核)                   #
+        #      16. 收集系统信息                           #
+        #      17. 按q键退出优化                          #
         ###################################################
         \e[0m 
     "
@@ -603,81 +619,86 @@ do
     #read -p '选择优化项：' Select
     case $Select in
         1)
-            Set_IP
-            echo "$Oneline"
-            sleep 3
-            ;;
-        2)
             Set_Hostname
             echo "$Oneline"
             sleep 3
             ;;
-        3)
+        2)
             Close_selinux
             echo "$Oneline"
             sleep 3
             ;;
+        3)
+            Set_IP
+            echo "$Oneline"
+            sleep 3
+            ;;
         4)
-            Install_EPEL
+            Set_date_timezone 
             echo "$Oneline"
             sleep 3
             ;;
         5)
-            Add_user
+            Set_motd 
             echo "$Oneline"
             sleep 3
             ;;
         6)
-            Set_sudo
+            Set_aliyun_repofile 
             echo "$Oneline"
             sleep 3
             ;;
         7)
-            Yum_package
+            Install_EPEL 
             echo "$Oneline"
             sleep 3
             ;;
         8)
-            Set_date_timezone
+            Yum_package
             echo "$Oneline"
             sleep 3
             ;;
         9)
-            Set_aliyun_repofile
+            Add_user
             echo "$Oneline"
             sleep 3
             ;;
         10)
-            Set_firewalld
+            Install_zabbix_agent 
             echo "$Oneline"
             sleep 3
             ;;
         11)
-            Install_clamav
+            Set_sudo 
             echo "$Oneline"
             sleep 3
             ;;
         12)
-            Install_zabbix_agent
+            Install_rkhunter
             echo "$Oneline"
             sleep 3
             ;;
         13)
-            Set_motd
+            Install_clamav
             echo "$Oneline"
             sleep 3
             ;;
         14)
-            Update_sys
+            Set_firewalld 
             echo "$Oneline"
             sleep 3
             ;;
         15)
+            Update_sys
+            echo "$Oneline"
+            sleep 3
+            ;;
+        16)
             System_info
             echo "$Oneline"
             sleep 3
             ;;
-        q|16)
+        q|17)
             echo -e "\e[5m\e[1m 退出脚本！\e[0m \n" 
             exit 0 ;;
         *)
